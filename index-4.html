@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acoustic Tester</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --bg-elevated: #262626;
+    --accent: #4ade80;
+    --accent-dim: #2d6a3f;
+    --warn: #fbbf24;
+    --error: #ef4444;
+    --text: #e5e5e5;
+    --text-dim: #888;
+    --border: #404040;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0;
+    padding: 12px;
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  h2 { font-size: 14px; margin: 16px 0 8px; color: var(--text-dim); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+  section {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  label { display: block; margin: 8px 0 4px; font-size: 12px; color: var(--text-dim); }
+  input, textarea {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: inherit;
+    font-size: 14px;
+  }
+  textarea { resize: vertical; min-height: 60px; font-family: monospace; font-size: 12px; }
+  button {
+    background: var(--accent-dim);
+    color: var(--text);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 12px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    -webkit-appearance: none;
+    margin: 4px 4px 4px 0;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.primary {
+    background: var(--accent);
+    color: var(--bg);
+    width: 100%;
+    padding: 16px;
+    font-size: 16px;
+  }
+  button.secondary { background: transparent; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .status {
+    padding: 8px;
+    background: var(--bg);
+    border-radius: 4px;
+    margin: 8px 0;
+    font-family: monospace;
+    font-size: 12px;
+    min-height: 20px;
+  }
+  .status.error { color: var(--error); }
+  .status.warn { color: var(--warn); }
+  .status.ok { color: var(--accent); }
+  .progress-bar {
+    height: 4px;
+    background: var(--bg);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.2s;
+  }
+  .results {
+    font-family: monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+    background: var(--bg);
+    padding: 8px;
+    border-radius: 4px;
+  }
+  .hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>🎵 Acoustic Tester</h1>
+
+<section>
+  <h2>Test setup</h2>
+  <label>Instrument label</label>
+  <input id="label" placeholder="e.g. Ipe v2 board B raw" value="">
+  <label>Notes (optional)</label>
+  <input id="notes" placeholder="Mic position, transducer location, etc.">
+  
+  <label>Frequencies to test (Hz, comma-separated)</label>
+  <textarea id="freqs">60, 80, 100, 120, 134.8, 150, 175, 196, 220, 247, 262, 294, 330, 350, 392, 440, 494, 523, 587, 659, 698, 784, 880, 988, 1000, 1200, 1500, 1760, 2000, 2200</textarea>
+  <div class="row">
+    <button class="secondary" onclick="loadDefaults('voice')">Voice range</button>
+    <button class="secondary" onclick="loadDefaults('uke')">Uke fundamentals</button>
+    <button class="secondary" onclick="loadDefaults('full')">Full sweep</button>
+  </div>
+  
+  <div class="row" style="margin-top: 8px;">
+    <div>
+      <label>Drive duration (s)</label>
+      <input id="driveDur" type="number" value="6" min="2" max="20" step="0.5">
+    </div>
+    <div>
+      <label>Gap duration (s)</label>
+      <input id="gapDur" type="number" value="3" min="1" max="10" step="0.5">
+    </div>
+  </div>
+  <label>Output level: <span id="ampLabel">0.85 (-1.4 dBFS)</span></label>
+  <input id="amplitude" type="range" min="30" max="95" value="85" step="5" oninput="updateAmpLabel()">
+  <div class="hint">Higher = louder. 0.85 matches typical music loudness. Reduce if you hear distortion from the transducer.</div>
+  <div class="hint" id="timeEstimate">Est. test time: 4.5 min</div>
+</section>
+
+<section>
+  <h2>Audio levels</h2>
+  <button class="secondary" onclick="testAudio()">Test mic & speaker</button>
+  <div class="status" id="audioStatus">Click to verify audio works</div>
+</section>
+
+<section>
+  <button class="primary" id="runBtn" onclick="runTest()">Start test</button>
+  <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+  <div class="status" id="status">Ready</div>
+</section>
+
+<section>
+  <h2>Results</h2>
+  <div class="results" id="results">No results yet. Run a test.</div>
+  <div class="row">
+    <button onclick="copyJson()">📋 Copy JSON</button>
+    <button onclick="downloadJson()">💾 Save file</button>
+    <button onclick="shareJson()">📤 Share</button>
+  </div>
+</section>
+
+<script>
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+let lastResults = null;
+
+// ============== FREQUENCY PRESETS ==============
+const PRESETS = {
+  voice: [82, 110, 140, 175, 196, 220, 247, 262, 294, 330, 349, 392, 440, 494, 523, 587, 659],
+  uke: [120, 134.8, 175, 196, 220, 247, 262, 294, 330, 392, 440, 494, 523, 587, 659, 784, 880, 988, 1000, 1200],
+  full: [60, 80, 100, 120, 134.8, 150, 175, 196, 220, 247, 262, 294, 330, 350, 392, 440, 494, 523, 587, 659, 698, 784, 880, 988, 1000, 1200, 1500, 1760, 2000, 2200]
+};
+function loadDefaults(name) {
+  document.getElementById('freqs').value = PRESETS[name].join(', ');
+  updateTimeEstimate();
+}
+
+// ============== WAV ENCODING ==============
+// HTMLAudioElement uses the native audio path, giving Spotify-level output
+// volume. Web Audio output is attenuated on Android Chrome when mic is active.
+function encodeWAV(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  
+  // RIFF header
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(view, 8, 'WAVE');
+  
+  // fmt subchunk
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);      // subchunk size
+  view.setUint16(20, 1, true);       // PCM
+  view.setUint16(22, 1, true);       // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate (16-bit mono)
+  view.setUint16(32, 2, true);       // block align
+  view.setUint16(34, 16, true);      // bits per sample
+  
+  // data subchunk
+  writeString(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  
+  // PCM samples (16-bit signed)
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    offset += 2;
+  }
+  return buffer;
+}
+
+function writeString(view, offset, str) {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
+  }
+}
+
+// ============== STATUS HELPERS ==============
+function setStatus(msg, type='') {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status ' + type;
+}
+function setProgress(pct) {
+  document.getElementById('progress').style.width = pct + '%';
+}
+function updateTimeEstimate() {
+  const freqs = parseFreqs();
+  const dur = parseFloat(document.getElementById('driveDur').value);
+  const gap = parseFloat(document.getElementById('gapDur').value);
+  const total = freqs.length * (dur + gap) + 2;  // 2s warmup
+  const min = Math.floor(total / 60);
+  const sec = Math.round(total % 60);
+  document.getElementById('timeEstimate').textContent = 
+    `Est. test time: ${min}:${sec.toString().padStart(2,'0')} (${freqs.length} freqs)`;
+}
+function updateAmpLabel() {
+  const v = parseFloat(document.getElementById('amplitude').value) / 100.0;
+  const dbfs = 20 * Math.log10(v);
+  document.getElementById('ampLabel').textContent = `${v.toFixed(2)} (${dbfs.toFixed(1)} dBFS)`;
+}
+
+['freqs','driveDur','gapDur'].forEach(id => 
+  document.getElementById(id).addEventListener('input', updateTimeEstimate));
+
+function parseFreqs() {
+  return document.getElementById('freqs').value
+    .split(/[,\s]+/)
+    .map(s => parseFloat(s))
+    .filter(f => !isNaN(f) && f > 20 && f < 20000);
+}
+
+// ============== AUDIO TEST ==============
+async function testAudio() {
+  const statusEl = document.getElementById('audioStatus');
+  try {
+    if (ctx.state === 'suspended') await ctx.resume();
+    
+    // Generate brief 440 Hz tone and play via HTML5 audio (same path as full test)
+    const sliderAmp = parseFloat(document.getElementById('amplitude').value) / 100.0;
+    const sampleRate = ctx.sampleRate;
+    const duration = 1.0;
+    const nSamples = Math.floor(duration * sampleRate);
+    const fadeSamples = Math.floor(0.05 * sampleRate);
+    const tone = new Float32Array(nSamples);
+    for (let i = 0; i < nSamples; i++) {
+      let amp = sliderAmp * Math.sin(2 * Math.PI * 440 * i / sampleRate);
+      if (i < fadeSamples) amp *= i / fadeSamples;
+      else if (i > nSamples - fadeSamples) amp *= (nSamples - i) / fadeSamples;
+      tone[i] = amp;
+    }
+    const wavBlob = new Blob([encodeWAV(tone, sampleRate)], { type: 'audio/wav' });
+    const audioEl = new Audio(URL.createObjectURL(wavBlob));
+    audioEl.volume = 1.0;
+    
+    // Request mic and measure level during playback
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+    
+    audioEl.play();
+    
+    const buf = new Float32Array(analyser.fftSize);
+    let peak = 0;
+    const samples = 10;
+    for (let i = 0; i < samples; i++) {
+      analyser.getFloatTimeDomainData(buf);
+      for (let j = 0; j < buf.length; j++) peak = Math.max(peak, Math.abs(buf[j]));
+      await new Promise(r => setTimeout(r, 100));
+    }
+    
+    stream.getTracks().forEach(t => t.stop());
+    
+    const peakDb = 20 * Math.log10(peak + 1e-9);
+    let msg = `🔊 Played 440 Hz at ${sliderAmp.toFixed(2)}. 🎤 Mic peak: ${peakDb.toFixed(1)} dB (level ${peak.toFixed(3)}).`;
+    let cls = 'ok';
+    if (peak < 0.01) {
+      msg += ' Too quiet for reliable measurement.';
+      cls = 'warn';
+    } else if (peak < 0.05) {
+      msg += ' Marginal. Try increasing volume or moving mic closer.';
+      cls = 'warn';
+    } else if (peak > 0.9) {
+      msg += ' Clipping — reduce mic gain or amplitude slider.';
+      cls = 'warn';
+    } else {
+      msg += ' Good level.';
+    }
+    statusEl.textContent = msg;
+    statusEl.className = 'status ' + cls;
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message + '. Mic permission needed (HTTPS required).';
+    statusEl.className = 'status error';
+  }
+}
+
+// ============== TEST EXECUTION ==============
+async function runTest() {
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  setProgress(0);
+  
+  try {
+    const freqs = parseFreqs();
+    if (freqs.length === 0) throw new Error('No valid frequencies provided');
+    
+    const driveDur = parseFloat(document.getElementById('driveDur').value);
+    const gapDur = parseFloat(document.getElementById('gapDur').value);
+    const amplitude = parseFloat(document.getElementById('amplitude').value) / 100.0;
+    const label = document.getElementById('label').value || 'Untitled test';
+    const notes = document.getElementById('notes').value;
+    
+    setStatus('Requesting microphone...');
+    if (ctx.state === 'suspended') await ctx.resume();
+    
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    
+    const sampleRate = ctx.sampleRate;
+    setStatus(`Generating test signal (sample rate ${sampleRate} Hz)...`);
+    
+    // Generate full test signal
+    const warmupSec = 2.0;
+    const fadeSec = 0.05;
+    const totalSec = warmupSec + freqs.length * (driveDur + gapDur);
+    const totalSamples = Math.floor(totalSec * sampleRate);
+    const signal = new Float32Array(totalSamples);
+    
+    const boundaries = [];
+    let cursor = Math.floor(warmupSec * sampleRate);  // skip warmup silence
+    
+    for (const freq of freqs) {
+      const nSamples = Math.floor(driveDur * sampleRate);
+      const fadeSamples = Math.floor(fadeSec * sampleRate);
+      const toneStart = cursor;
+      
+      for (let i = 0; i < nSamples; i++) {
+        let amp = amplitude * Math.sin(2 * Math.PI * freq * i / sampleRate);
+        if (i < fadeSamples) amp *= i / fadeSamples;
+        else if (i > nSamples - fadeSamples) amp *= (nSamples - i) / fadeSamples;
+        signal[cursor + i] = amp;
+      }
+      
+      boundaries.push({
+        freq, 
+        toneStart, 
+        toneEnd: cursor + nSamples,
+        gapEnd: cursor + nSamples + Math.floor(gapDur * sampleRate)
+      });
+      cursor += nSamples + Math.floor(gapDur * sampleRate);
+    }
+    
+    // Set up recording (via Web Audio for capture)
+    const source = ctx.createMediaStreamSource(stream);
+    const bufferSize = 4096;
+    const recorder = ctx.createScriptProcessor(bufferSize, 1, 1);
+    const chunks = [];
+    
+    recorder.onaudioprocess = (e) => {
+      const data = e.inputBuffer.getChannelData(0);
+      chunks.push(new Float32Array(data));
+    };
+    
+    source.connect(recorder);
+    // ScriptProcessor must be connected to destination to function
+    const silentGain = ctx.createGain();
+    silentGain.gain.value = 0;
+    recorder.connect(silentGain).connect(ctx.destination);
+    
+    // Encode signal as WAV and play via HTMLAudioElement
+    // This uses the native media audio path which gets full system volume
+    // on Android, unlike Web Audio output which is often attenuated.
+    setStatus('Encoding test signal as WAV...', 'ok');
+    const wavBuffer = encodeWAV(signal, sampleRate);
+    const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+    const audioUrl = URL.createObjectURL(wavBlob);
+    
+    const audioElement = new Audio(audioUrl);
+    audioElement.volume = 1.0;
+    audioElement.preload = 'auto';
+    
+    // Wait for audio to be ready
+    await new Promise((resolve, reject) => {
+      audioElement.addEventListener('canplaythrough', resolve, { once: true });
+      audioElement.addEventListener('error', () => reject(new Error('Audio load failed')), { once: true });
+      audioElement.load();
+    });
+    
+    // Play signal
+    setStatus('Recording test signal — stay quiet...', 'ok');
+    const startTime = Date.now();
+    await audioElement.play();
+    
+    // Progress updates
+    const progressInterval = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const pct = Math.min(100, (elapsed / totalSec) * 100);
+      setProgress(pct);
+      setStatus(`Recording... ${elapsed.toFixed(1)}s / ${totalSec.toFixed(1)}s`);
+    }, 200);
+    
+    // Wait for playback to finish + buffer time for trailing audio
+    await new Promise(resolve => {
+      audioElement.addEventListener('ended', () => setTimeout(resolve, 500), { once: true });
+    });
+    
+    URL.revokeObjectURL(audioUrl);
+    
+    clearInterval(progressInterval);
+    setProgress(100);
+    
+    // Stop recording
+    recorder.disconnect();
+    source.disconnect();
+    stream.getTracks().forEach(t => t.stop());
+    
+    // Concatenate chunks
+    let recordedLength = 0;
+    for (const c of chunks) recordedLength += c.length;
+    const recording = new Float32Array(recordedLength);
+    let offset = 0;
+    for (const c of chunks) {
+      recording.set(c, offset);
+      offset += c.length;
+    }
+    
+    // Detect Bluetooth latency by finding when first tone appears
+    setStatus('Detecting playback latency...');
+    const recordSampleRate = sampleRate;
+    const latencyOffset = detectLatency(recording, boundaries[0], recordSampleRate);
+    
+    // Analyze each tone
+    setStatus('Analyzing recording...');
+    const results = [];
+    for (let i = 0; i < boundaries.length; i++) {
+      const b = boundaries[i];
+      const r = analyzeTone(recording, b, recordSampleRate, latencyOffset);
+      if (r) results.push(r);
+    }
+    
+    // Noise floor from initial warmup section
+    const noiseEnd = Math.floor(warmupSec * 0.9 * recordSampleRate);
+    const noiseSection = recording.slice(0, noiseEnd);
+    const noiseRms = Math.sqrt(noiseSection.reduce((s, x) => s + x*x, 0) / noiseSection.length);
+    const noiseFloorDb = 20 * Math.log10(noiseRms + 1e-9);
+    
+    // Peak detection for clipping
+    let peakLevel = 0;
+    for (let i = 0; i < recording.length; i++) {
+      if (Math.abs(recording[i]) > peakLevel) peakLevel = Math.abs(recording[i]);
+    }
+    
+    lastResults = {
+      metadata: {
+        label,
+        notes,
+        timestamp: new Date().toISOString(),
+        sample_rate: sampleRate,
+        drive_duration_s: driveDur,
+        gap_duration_s: gapDur,
+        drive_amplitude: amplitude,
+        drive_level_dbfs: parseFloat((20 * Math.log10(amplitude)).toFixed(1)),
+        n_frequencies: freqs.length,
+        noise_floor_db: parseFloat(noiseFloorDb.toFixed(1)),
+        peak_input_level: parseFloat(peakLevel.toFixed(3)),
+        peak_input_db: parseFloat((20 * Math.log10(peakLevel + 1e-9)).toFixed(1)),
+        clipping_detected: peakLevel > 0.99,
+        signal_too_low: peakLevel < 0.01,
+        bluetooth_latency_ms: parseFloat((latencyOffset / sampleRate * 1000).toFixed(0))
+      },
+      frequencies_tested: freqs,
+      results: results
+    };
+    
+    displayResults();
+    if (results.length === 0) {
+      setStatus(`Test complete, but no tones produced analyzable results. Check mic level and transducer coupling.`, 'error');
+    } else if (peakLevel < 0.01) {
+      setStatus(`Test complete (${results.length} analyzed) but signal level very low. Results may be unreliable.`, 'warn');
+    } else {
+      setStatus(`Test complete. ${results.length} frequencies analyzed.`, 'ok');
+    }
+  } catch (e) {
+    setStatus('Error: ' + e.message, 'error');
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ============== ANALYSIS ==============
+function detectLatency(recording, firstBoundary, sampleRate) {
+  // Use broadband energy envelope rather than frequency-specific detection.
+  // Find the first sustained rise above noise floor after the warmup region.
+  
+  const warmupSamples = firstBoundary.toneStart;
+  const noiseSection = recording.slice(0, Math.floor(warmupSamples * 0.8));
+  
+  // Compute noise floor from warmup
+  let noiseSum = 0;
+  for (let i = 0; i < noiseSection.length; i++) noiseSum += noiseSection[i] * noiseSection[i];
+  const noiseRms = Math.sqrt(noiseSum / noiseSection.length);
+  
+  // Threshold = 4x noise RMS (about +12 dB above noise floor)
+  const threshold = Math.max(noiseRms * 4, 0.005);
+  
+  // Compute short-window energy envelope from start of expected first tone
+  const winSize = Math.floor(0.05 * sampleRate); // 50ms windows
+  const searchStart = Math.max(0, warmupSamples - Math.floor(0.1 * sampleRate)); // can be slightly early
+  const searchEnd = Math.min(recording.length - winSize, warmupSamples + Math.floor(2.0 * sampleRate)); // up to 2s late
+  
+  let bestOffset = null;
+  for (let start = searchStart; start < searchEnd; start += Math.floor(winSize / 2)) {
+    let energy = 0;
+    for (let i = 0; i < winSize; i++) energy += recording[start + i] * recording[start + i];
+    const rms = Math.sqrt(energy / winSize);
+    if (rms > threshold) {
+      bestOffset = start - warmupSamples;
+      break;
+    }
+  }
+  
+  // Fallback: if detection failed or returned unreasonable negative, use typical BT latency
+  if (bestOffset === null || bestOffset < -Math.floor(0.05 * sampleRate)) {
+    console.warn('Latency detection unreliable, using fallback 150ms');
+    bestOffset = Math.floor(0.15 * sampleRate);
+  }
+  
+  // Reject latencies greater than 1 second (something is very wrong)
+  if (bestOffset > sampleRate) {
+    console.warn('Latency detection returned >1s, using fallback 150ms');
+    bestOffset = Math.floor(0.15 * sampleRate);
+  }
+  
+  return bestOffset;
+}
+
+function goertzelDb(samples, sampleRate, targetFreq) {
+  const N = samples.length;
+  const k = Math.round(N * targetFreq / sampleRate);
+  const omega = 2 * Math.PI * k / N;
+  const cosine = Math.cos(omega);
+  const sine = Math.sin(omega);
+  const coeff = 2 * cosine;
+  
+  let q1 = 0, q2 = 0;
+  for (let i = 0; i < N; i++) {
+    const q0 = coeff * q1 - q2 + samples[i];
+    q2 = q1;
+    q1 = q0;
+  }
+  
+  const real = q1 - q2 * cosine;
+  const imag = q2 * sine;
+  const mag = Math.sqrt(real*real + imag*imag) / (N / 2);
+  return 20 * Math.log10(mag + 1e-9);
+}
+
+function analyzeTone(recording, boundary, sampleRate, latencyOffset) {
+  const f = boundary.freq;
+  const ts = boundary.toneStart + latencyOffset;
+  const te = boundary.toneEnd + latencyOffset;
+  const ge = boundary.gapEnd + latencyOffset;
+  
+  if (te > recording.length) return null;
+  
+  // Steady-state window: middle 60% of the tone (skip first 30% for attack 
+  // transient, last 10% for release fade). Proportional to actual drive duration
+  // so this works for any drive length from ~0.5s up.
+  const toneDuration = te - ts;
+  const ssStart = Math.max(0, ts + Math.floor(toneDuration * 0.3));
+  const ssEnd = Math.min(recording.length, ts + Math.floor(toneDuration * 0.9));
+  if (ssEnd <= ssStart || (ssEnd - ssStart) < sampleRate * 0.15) return null;
+  
+  const ss = recording.slice(ssStart, ssEnd);
+  const ssAmpDb = goertzelDb(ss, sampleRate, f);
+  
+  // Harmonics
+  const harmonics = {};
+  for (const h of [2, 3, 4, 5]) {
+    const hf = h * f;
+    if (hf > sampleRate / 2 - 100) break;
+    harmonics[`h${h}`] = {
+      freq_hz: hf,
+      amp_db: parseFloat(goertzelDb(ss, sampleRate, hf).toFixed(1))
+    };
+  }
+  
+  // Decay tracking
+  const decay = [];
+  for (const tMs of [50, 100, 200, 400, 800, 1500]) {
+    const center = te + Math.floor(tMs * sampleRate / 1000);
+    const winSize = Math.floor(0.1 * sampleRate);
+    const ws = center - Math.floor(winSize / 2);
+    const we = center + Math.floor(winSize / 2);
+    if (we > Math.min(recording.length, ge)) break;
+    const win = recording.slice(ws, we);
+    decay.push({
+      time_ms: tMs,
+      amp_db: parseFloat(goertzelDb(win, sampleRate, f).toFixed(1))
+    });
+  }
+  
+  // RT60 estimate: time to drop 30 dB, extrapolated to 60
+  let rt60 = null;
+  for (const d of decay) {
+    if (ssAmpDb - d.amp_db >= 30) {
+      rt60 = parseFloat((2 * d.time_ms / 1000).toFixed(2));
+      break;
+    }
+  }
+  
+  return {
+    drive_freq_hz: f,
+    steady_state_amp_db: parseFloat(ssAmpDb.toFixed(1)),
+    harmonics,
+    decay_samples: decay,
+    rt60_estimate_s: rt60
+  };
+}
+
+// ============== DISPLAY & EXPORT ==============
+function displayResults() {
+  if (!lastResults) return;
+  const r = lastResults.results;
+  const m = lastResults.metadata;
+  let txt = `${m.label}\n`;
+  txt += `Noise floor: ${m.noise_floor_db} dB | Peak input: ${m.peak_input_db} dB | BT latency: ${m.bluetooth_latency_ms} ms\n`;
+  if (m.clipping_detected) txt += `⚠ CLIPPING DETECTED — reduce input gain\n`;
+  if (m.signal_too_low) txt += `⚠ SIGNAL TOO LOW — verify transducer is coupled to instrument and audio output volume is high\n`;
+  if (r.length === 0) {
+    txt += `\nNo tones analyzed. Likely causes:\n`;
+    txt += `  • Mic captured no signal (peak ${m.peak_input_db} dB)\n`;
+    txt += `  • Drive duration too short (try 4-6s)\n`;
+    txt += `  • Transducer not coupled to instrument\n`;
+    document.getElementById('results').textContent = txt;
+    return;
+  }
+  txt += '\n';
+  txt += `Freq (Hz) | SS (dB) | 2H (dB) | 3H (dB) | RT60 (s)\n`;
+  txt += `---------|---------|---------|---------|----------\n`;
+  for (const x of r) {
+    const ss = x.steady_state_amp_db.toFixed(1).padStart(7);
+    const h2 = (x.harmonics.h2?.amp_db?.toFixed(1) || '   --').padStart(7);
+    const h3 = (x.harmonics.h3?.amp_db?.toFixed(1) || '   --').padStart(7);
+    const rt = (x.rt60_estimate_s ? x.rt60_estimate_s.toFixed(2) : '  --').padStart(7);
+    txt += `${x.drive_freq_hz.toFixed(1).padStart(8)} | ${ss} | ${h2} | ${h3} | ${rt}\n`;
+  }
+  document.getElementById('results').textContent = txt;
+}
+
+function copyJson() {
+  if (!lastResults) return alert('No results to copy');
+  navigator.clipboard.writeText(JSON.stringify(lastResults, null, 2))
+    .then(() => alert('Copied to clipboard'))
+    .catch(e => alert('Copy failed: ' + e.message));
+}
+
+function downloadJson() {
+  if (!lastResults) return alert('No results to save');
+  const blob = new Blob([JSON.stringify(lastResults, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeLabel = (lastResults.metadata.label || 'test').replace(/[^a-z0-9-]/gi, '_');
+  const ts = lastResults.metadata.timestamp.replace(/[:.]/g, '-').substring(0, 19);
+  a.href = url;
+  a.download = `${safeLabel}_${ts}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function shareJson() {
+  if (!lastResults) return alert('No results to share');
+  const text = JSON.stringify(lastResults, null, 2);
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'Acoustic test results',
+        text: text
+      });
+    } catch (e) {
+      if (e.name !== 'AbortError') alert('Share failed: ' + e.message);
+    }
+  } else {
+    alert('Share not supported on this browser. Use copy or download.');
+  }
+}
+
+// Initialize
+updateTimeEstimate();
+updateAmpLabel();
+</script>
+
+</body>
+</html>
